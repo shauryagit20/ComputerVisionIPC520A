@@ -345,6 +345,8 @@ class LoadStreams:
         self.vid_stride = vid_stride  # video frame-rate stride
         sources = Path(sources).read_text().rsplit() if os.path.isfile(sources) else [sources]
         n = len(sources)
+        self.realsense_camera =  False
+        self.pipeline =  None
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
 
         self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
@@ -359,6 +361,7 @@ class LoadStreams:
                 s = pafy.new(s).getbest(preftype="mp4").url  # YouTube URL
             s = eval(s) if s.isnumeric() else s  # i.e. s = '0' local webcam
             if s!=5:
+                self.realsense_camera =  True
                 assert not is_colab(), '--source 0 webcam unsupported on Colab. Rerun command in a local environment.'
                 assert not is_kaggle(), '--source 0 webcam unsupported on Kaggle. Rerun command in a local environment.'
                 cap = cv2.VideoCapture(s, cv2.CAP_DSHOW)
@@ -376,12 +379,12 @@ class LoadStreams:
                 self.threads[i].start()
                 LOGGER.info('')  # newline
             if s == 5:
-                pipeline = rs.pipeline()
+                self.pipeline = rs.pipeline()
                 config =  rs.config()
                 config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
                 config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-                pipeline.start(config)
-                frames =  pipeline.wait_for_frames()
+                self.pipeline.start(config)
+                frames =  self.pipeline.wait_for_frames()
                 color_frame = frames.get_color_frame()
                 depth_frame = frames.get_depth_frame()
                 color_image = np.asanyarray(color_frame.get_data())
@@ -390,7 +393,7 @@ class LoadStreams:
                 self.frames[i] = float('inf')  # Infinite stream
                 self.fps[i] = 30  # Assume 30 FPS
 
-                self.threads[i] = Thread(target=self.update_realsense, args=([i, pipeline]), daemon=True)
+                self.threads[i] = Thread(target=self.update_realsense, args=([i, self.pipeline]), daemon=True)
                 LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
                 self.threads[i].start()
 
@@ -436,11 +439,16 @@ class LoadStreams:
 
     def __next__(self):
         self.count += 1
-        if not all(x.is_alive() for x in self.threads) or cv2.waitKey(1) == ord('q'):  # q to quit
-            cv2.destroyAllWindows()
-            raise StopIteration
 
-        im0 = self.imgs.copy()
+        if self.realsense_camera:
+            im0 =  self.imgs.copy()
+
+        else:
+            if not all(x.is_alive() for x in self.threads) or cv2.waitKey(1) == ord('q'):  # q to quit
+                cv2.destroyAllWindows()
+                raise StopIteration
+
+            im0 = self.imgs.copy()
         if self.transforms:
             im = np.stack([self.transforms(x) for x in im0])  # transforms
         else:
