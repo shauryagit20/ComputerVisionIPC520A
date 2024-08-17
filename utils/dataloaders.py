@@ -379,6 +379,7 @@ class LoadStreams:
                 self.threads[i].start()
                 LOGGER.info('')  # newline
             if s == 5:
+                self.realsense_camera = True
                 self.pipeline = rs.pipeline()
                 config =  rs.config()
                 config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
