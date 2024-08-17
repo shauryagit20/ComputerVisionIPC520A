@@ -358,7 +358,7 @@ class LoadStreams:
                 import pafy
                 s = pafy.new(s).getbest(preftype="mp4").url  # YouTube URL
             s = eval(s) if s.isnumeric() else s  # i.e. s = '0' local webcam
-            if s == 0:
+            if s!=5:
                 assert not is_colab(), '--source 0 webcam unsupported on Colab. Rerun command in a local environment.'
                 assert not is_kaggle(), '--source 0 webcam unsupported on Kaggle. Rerun command in a local environment.'
                 cap = cv2.VideoCapture(s, cv2.CAP_DSHOW)
@@ -375,7 +375,7 @@ class LoadStreams:
                 LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
                 self.threads[i].start()
                 LOGGER.info('')  # newline
-            if s == 101:
+            if s == 5:
                 pipeline = rs.pipeline()
                 config =  rs.config()
                 config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
