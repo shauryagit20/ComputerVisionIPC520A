@@ -346,7 +346,7 @@ class LoadStreams:
         sources = Path(sources).read_text().rsplit() if os.path.isfile(sources) else [sources]
         n = len(sources)
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
-        self.pipelines=[]
+
         self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
         pipeline =  None
         for i, s in enumerate(sources):  # index, source
@@ -381,7 +381,6 @@ class LoadStreams:
                 config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
                 config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
                 pipeline.start(config)
-                self.pipelines[i] = pipeline
                 frames =  pipeline.wait_for_frames()
                 color_frame = frames.get_color_frame()
                 depth_frame = frames.get_depth_frame()
