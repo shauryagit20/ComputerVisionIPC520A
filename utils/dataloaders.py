@@ -390,7 +390,7 @@ class LoadStreams:
                 self.frames[i] = float('inf')  # Infinite stream
                 self.fps[i] = 30  # Assume 30 FPS
 
-                self.threads[i] = Thread(target=self.update, args=([i, pipeline]), daemon=True)
+                self.threads[i] = Thread(target=self.update_realsense, args=([i, pipeline]), daemon=True)
                 LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
                 self.threads[i].start()
 
