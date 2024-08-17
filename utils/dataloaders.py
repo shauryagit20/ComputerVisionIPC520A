@@ -1,4 +1,5 @@
 import contextlib
+import pyrealsense2 as rs
 import glob
 import hashlib
 import json
@@ -12,6 +13,7 @@ from multiprocessing.pool import Pool, ThreadPool
 from pathlib import Path
 from threading import Thread
 from urllib.parse import urlparse
+
 
 import numpy as np
 import psutil
@@ -190,8 +192,6 @@ class LoadScreenshots:
     def __init__(self, source, img_size=640, stride=32, auto=True, transforms=None):
         # source = [screen_number left top width height] (pixels)
         check_requirements('mss')
-        import mss
-
         source, *params = source.split()
         self.screen, left, top, width, height = 0, None, None, None, None  # default to full screen 0
         if len(params) == 1:
@@ -346,7 +346,9 @@ class LoadStreams:
         sources = Path(sources).read_text().rsplit() if os.path.isfile(sources) else [sources]
         n = len(sources)
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
+        self.pipelines=[]
         self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
+        pipeline =  None
         for i, s in enumerate(sources):  # index, source
             # Start thread to read frames from video stream
             st = f'{i + 1}/{n}: {s}... '
@@ -359,19 +361,40 @@ class LoadStreams:
             if s == 0:
                 assert not is_colab(), '--source 0 webcam unsupported on Colab. Rerun command in a local environment.'
                 assert not is_kaggle(), '--source 0 webcam unsupported on Kaggle. Rerun command in a local environment.'
-            cap = cv2.VideoCapture(s)
-            assert cap.isOpened(), f'{st}Failed to open {s}'
-            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)  # warning: may return 0 or nan
-            self.frames[i] = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float('inf')  # infinite stream fallback
-            self.fps[i] = max((fps if math.isfinite(fps) else 0) % 100, 0) or 30  # 30 FPS fallback
+                cap = cv2.VideoCapture(s, cv2.CAP_DSHOW)
+                assert cap.isOpened(), f'{st}Failed to open {s}'
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)  # warning: may return 0 or nan
+                self.frames[i] = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float(
+                    'inf')  # infinite stream fallback
+                self.fps[i] = max((fps if math.isfinite(fps) else 0) % 100, 0) or 30  # 30 FPS fallback
 
-            _, self.imgs[i] = cap.read()  # guarantee first frame
-            self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
-            LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
-            self.threads[i].start()
-        LOGGER.info('')  # newline
+                _, self.imgs[i] = cap.read()  # guarantee first frame
+                self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
+                LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
+                self.threads[i].start()
+                LOGGER.info('')  # newline
+            if s == 101:
+                pipeline = rs.pipeline()
+                config =  rs.config()
+                config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+                config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+                pipeline.start(config)
+                self.pipelines[i] = pipeline
+                frames =  pipeline.wait_for_frames()
+                color_frame = frames.get_color_frame()
+                depth_frame = frames.get_depth_frame()
+                color_image = np.asanyarray(color_frame.get_data())
+                self.imgs[i] = color_image
+                w, h = color_image.shape[1], color_image.shape[0]
+                self.frames[i] = float('inf')  # Infinite stream
+                self.fps[i] = 30  # Assume 30 FPS
+
+                self.threads[i] = Thread(target=self.update, args=([i, pipeline]), daemon=True)
+                LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
+                self.threads[i].start()
+
 
         # check for common shapes
         s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])
@@ -397,6 +420,17 @@ class LoadStreams:
                     cap.open(stream)  # re-open stream if signal was lost
             time.sleep(0.0)  # wait time
 
+    def update_realsense(self, i, pipeline):
+        # Read stream `i` frames in daemon thread
+        while True:
+            frames = pipeline.wait_for_frames()
+            color_frame = frames.get_color_frame()
+            if not color_frame:
+                LOGGER.warning('WARNING ⚠️ RealSense stream unresponsive, please check your camera connection.')
+                continue
+            color_image = np.asanyarray(color_frame.get_data())
+            self.imgs[i] = color_image
+            time.sleep(0.0)  # wait time
     def __iter__(self):
         self.count = -1
         return self
